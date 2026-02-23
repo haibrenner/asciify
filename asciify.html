@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ASCIIfy - Non-ASCII Character Detector</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* Custom styles for the highlighted characters */
+        .non-ascii {
+            background-color: #f87171; /* red-400 */
+            color: white;
+            padding: 0 2px;
+            border-radius: 2px;
+            font-weight: bold;
+            box-shadow: 0 0 4px rgba(248, 113, 113, 0.6);
+        }
+
+        /* Ensuring the output area preserves whitespace and wraps */
+        #output {
+            white-space: pre-wrap;
+            word-wrap: break-word;
+            font-family: 'ui-monospace', 'SFMono-Regular', 'Menlo', 'Monaco', 'Consolas', 'Liberation Mono', 'Courier New', monospace;
+        }
+
+        /* Drop zone highlight */
+        .drag-over {
+            border-color: #3b82f6 !important;
+            background-color: #eff6ff !important;
+        }
+    </style>
+</head>
+<body class="bg-slate-50 min-h-screen text-slate-800">
+
+    <div class="max-w-4xl mx-auto p-6 md:p-10">
+        <!-- Header -->
+        <header class="mb-8 text-center">
+            <h1 class="text-4xl font-extrabold text-slate-900 mb-2">ASCIIfy</h1>
+            <p class="text-slate-600">Quickly identify non-ASCII characters (values 128+) in your text.</p>
+        </header>
+
+        <!-- Status Indicator -->
+        <div id="status-bar" class="mb-6 p-4 rounded-xl text-center font-bold transition-all duration-300 hidden">
+            <span id="status-text"></span>
+        </div>
+
+        <!-- Input Area -->
+        <div 
+            id="drop-zone"
+            class="bg-white border-2 border-dashed border-slate-300 rounded-2xl p-6 transition-all duration-200"
+        >
+            <textarea 
+                id="input-text" 
+                class="w-full h-48 p-4 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:outline-none resize-none mb-4"
+                placeholder="Paste your text here or drag and drop any text-based file (.txt, .md, .js, .json, etc.)..."
+            ></textarea>
+            
+            <div class="flex flex-col sm:flex-row gap-3 justify-between items-center">
+                <p class="text-xs text-slate-400 italic">Supports all text-based files via drag & drop</p>
+                <div class="flex gap-3">
+                    <button 
+                        onclick="clearApp()" 
+                        class="px-6 py-2 bg-slate-200 hover:bg-slate-300 text-slate-700 font-semibold rounded-lg transition-colors"
+                    >
+                        Clear
+                    </button>
+                    <button 
+                        onclick="processText()" 
+                        class="px-6 py-2 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg shadow-md transition-colors"
+                    >
+                        Scan Text
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Result Display -->
+        <div id="result-container" class="mt-8 hidden">
+            <div class="flex justify-between items-center mb-4">
+                <h2 class="text-xl font-bold text-slate-800">Analysis Output</h2>
+                <div class="text-sm font-medium text-slate-500" id="stats-count"></div>
+            </div>
+            <div id="output" class="bg-white border border-slate-200 rounded-2xl p-6 min-h-[100px] overflow-auto shadow-sm">
+                <!-- Highlighted text goes here -->
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const inputText = document.getElementById('input-text');
+        const output = document.getElementById('output');
+        const statusBar = document.getElementById('status-bar');
+        const statusText = document.getElementById('status-text');
+        const resultContainer = document.getElementById('result-container');
+        const statsCount = document.getElementById('stats-count');
+        const dropZone = document.getElementById('drop-zone');
+
+        // Drag and Drop Logic
+        dropZone.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            dropZone.classList.add('drag-over');
+        });
+
+        dropZone.addEventListener('dragleave', () => {
+            dropZone.classList.remove('drag-over');
+        });
+
+        dropZone.addEventListener('drop', (e) => {
+            e.preventDefault();
+            dropZone.classList.remove('drag-over');
+            
+            const file = e.dataTransfer.files[0];
+            if (file) {
+                // We'll attempt to read any file as text. 
+                // This handles .md, .txt, .json, .js, .html, etc.
+                const reader = new FileReader();
+                reader.onload = (event) => {
+                    inputText.value = event.target.result;
+                    processText();
+                };
+                reader.onerror = () => {
+                    showSimpleMessage("Error reading file.", "bg-red-100 text-red-700 border border-red-200");
+                };
+                reader.readAsText(file);
+            }
+        });
+
+        function showSimpleMessage(msg, classes) {
+            statusBar.className = `mb-6 p-4 rounded-xl text-center font-bold transition-all duration-300 ${classes}`;
+            statusText.innerText = msg;
+            statusBar.classList.remove('hidden');
+        }
+
+        function clearApp() {
+            inputText.value = '';
+            output.innerHTML = '';
+            resultContainer.classList.add('hidden');
+            statusBar.classList.add('hidden');
+        }
+
+        function processText() {
+            const text = inputText.value;
+            if (!text) {
+                statusBar.classList.add('hidden');
+                resultContainer.classList.add('hidden');
+                return;
+            }
+
+            let nonAsciiCount = 0;
+            let processedHtml = '';
+
+            // Iterate through each character
+            for (let i = 0; i < text.length; i++) {
+                const char = text[i];
+                const code = char.charCodeAt(0);
+
+                // ASCII is 0-127. 
+                // Note: charCodeAt returns UTF-16 code units. 
+                // Values > 127 are considered non-ASCII.
+                if (code > 127) {
+                    nonAsciiCount++;
+                    // Wrap non-ASCII in a span, escape HTML entities for safety
+                    processedHtml += `<span class="non-ascii" title="Char Code: ${code}">${escapeHtml(char)}</span>`;
+                } else {
+                    processedHtml += escapeHtml(char);
+                }
+            }
+
+            // Update UI
+            output.innerHTML = processedHtml;
+            resultContainer.classList.remove('hidden');
+            
+            if (nonAsciiCount > 0) {
+                showSimpleMessage(`Warning: Found ${nonAsciiCount} non-ASCII character${nonAsciiCount === 1 ? '' : 's'}.`, "bg-red-100 text-red-800 border-2 border-red-200 shadow-sm");
+                statsCount.innerText = `Total characters: ${text.length} | Non-ASCII: ${nonAsciiCount}`;
+            } else {
+                showSimpleMessage("Success: Pure ASCII text! No non-ASCII characters found.", "bg-green-100 text-green-800 border-2 border-green-200 shadow-sm");
+                statsCount.innerText = `Total characters: ${text.length} | All ASCII`;
+            }
+
+            // Scroll to results
+            resultContainer.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        // Live scan as typing (debounced)
+        let timeout = null;
+        inputText.addEventListener('input', () => {
+            clearTimeout(timeout);
+            timeout = setTimeout(processText, 500);
+        });
+    </script>
+</body>
+</html>
